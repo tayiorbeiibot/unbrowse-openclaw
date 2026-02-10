@@ -75,6 +75,130 @@ npm run build
 openclaw gateway restart
 ```
 
+### Option E: Local Source Build (Development/Testing) ⭐
+
+This method is ideal when you have a local clone of the repository and want to develop or test changes:
+
+#### Step-by-Step Installation
+
+```bash
+# 1. Navigate to the plugin directory
+cd /home/ubuntu/Projects/unbrowse
+
+# 2. Ensure dependencies are installed (using bun or npm)
+bun install
+# or
+npm install
+
+# 3. Build the plugin from TypeScript source
+# The plugin must be compiled before it can be loaded
+bun run tsc -p tsconfig.json
+
+# Verify the dist directory was created
+ls -la dist/
+# Should show: index.js, index.d.ts, and src/ directory
+
+# 4. Update ~/.openclaw/openclaw.json configuration
+# Add the plugin path to plugins.load.paths and enable it in entries
+```
+
+**Config file example (~/.openclaw/openclaw.json):**
+
+```json
+{
+  "plugins": {
+    "load": {
+      "paths": [
+        "/home/ubuntu/Projects/unbrowse"
+      ]
+    },
+    "entries": {
+      "unbrowse-openclaw": {
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+**Important notes:**
+- The plugin manifest ID is `unbrowse-openclaw` (from openclaw.plugin.json), not `unbrowse`
+- The `load.paths` points to the **source directory** containing the built `dist/` folder
+- The `entries.unbrowse-openclaw.enabled: true` enables the plugin
+- The `dist/` directory must exist and contain the compiled JavaScript files
+
+#### Step 5: Restart the Gateway
+
+```bash
+openclaw gateway restart
+```
+
+**Expected output:**
+```
+[plugins] [unbrowse] Auto-discover: 31 existing skills loaded
+[plugins] [unbrowse] Plugin registered (13 tools, auto-discover)
+Restarted systemd service: openclaw-gateway.service
+```
+
+#### Step 6: Verify Installation
+
+```bash
+# List all installed plugins
+openclaw plugins list
+
+# Look for unbrowse in the list with status "loaded":
+# Name: Unbrowse
+# ID: unbrowse
+# Status: loaded
+# Version: 0.5.6
+```
+
+**Full plugin list example:**
+```
+Plugins (7/35 loaded)
+┌──────────────┬──────────┬──────────┬──────────────────────────────────────────────────┬──────────┐
+│ Name         │ ID       │ Status   │ Source                                    │ Version  │
+├──────────────┼──────────┼──────────┼──────────────────────────────────────────────────┼──────────┤
+│ Unbrowse     │ unbrowse │ loaded   │ ~/Projects/unbrowse/dist/index.js          │ 0.5.6    │
+│ ...          │ ...      │ ...      │ ...                                      │ ...      │
+└──────────────┴──────────┴──────────┴──────────────────────────────────────────────────┴──────────┘
+```
+
+#### Viewing Gateway Logs
+
+```bash
+# Follow the logs in real-time
+tail -f ~/.openclaw/logs/gateway.log | grep unbrowse
+
+# Check recent logs
+tail -100 ~/.openclaw/logs/gateway.log | grep unbrowse
+```
+
+#### Development Workflow
+
+When making changes to the plugin:
+
+```bash
+# 1. Edit TypeScript source files
+# 2. Rebuild the plugin
+cd /home/ubuntu/Projects/unbrowse
+bun run tsc -p tsconfig.json
+
+# 3. Restart gateway to reload
+openclaw gateway restart
+
+# 4. Check logs for errors
+tail -f ~/.openclaw/logs/gateway.log | grep unbrowse
+```
+
+### Quick Installation Summary
+
+| Method | When to Use | Commands |
+|--------|--------------|-----------|
+| **One-liner** | Production, quick install | `openclaw plugins install @getfoundry/unbrowse-openclaw` |
+| **Manual Clone** | Want extension in ~/.openclaw/extensions/ | `git clone ... && npm install && npm run build` |
+| **Local Source** | Development, testing, custom changes | `cd /path/to/unbrowse && bun run tsc` then add to config paths |
+
 ## Quick Start — No Config Needed! 🚀
 
 **Unbrowse works immediately after installation.** No API key required:
@@ -142,6 +266,8 @@ unbrowse_replay service="twitter" endpoint="GET /api/timeline"
 
 ## Tools
 
+All unbrowse tools are available once the plugin is loaded and the gateway is restarted.
+
 ### Capture & Browse
 
 | Tool | Description |
@@ -174,6 +300,25 @@ unbrowse_replay service="twitter" endpoint="GET /api/timeline"
 | `unbrowse_workflow_learn` | Analyze recordings to generate api-package or workflow skills |
 | `unbrowse_workflow_execute` | Execute workflow or api-package skills with success tracking |
 | `unbrowse_workflow_stats` | View success rates, earnings, and leaderboards |
+
+### Using Unbrowse Tools
+
+Once the plugin is loaded, you can use unbrowse tools in your OpenClaw agents:
+
+```bash
+# Through the agent interface (natural language)
+"Capture API traffic from github.com"
+"Generate a skill from the captured github.com endpoints"
+"List all unbrowse skills"
+
+# Example agent commands:
+unbrowse_capture url="github.com"
+unbrowse_generate_skill domain="github.com"
+unbrowse_replay service="github" endpoint="GET /user/repos"
+unbrowse_login url="https://github.com/login"
+unbrowse_session
+unbrowse_cookies domain="github.com"
+```
 
 ## Skill Categories
 
@@ -262,8 +407,27 @@ Unbrowse works on all OpenClaw-compatible platforms:
 # Type check
 npx tsc --noEmit
 
+# Build from source (TypeScript → JavaScript)
+bun run tsc -p tsconfig.json
+# or
+npm run build
+
 # Test locally
 openclaw gateway restart
+tail -f ~/.openclaw/logs/gateway.log | grep unbrowse
+```
+
+### Development Workflow
+
+```bash
+# 1. Make changes to TypeScript source files
+# 2. Rebuild the plugin
+bun run tsc -p tsconfig.json
+
+# 3. Restart the gateway to reload changes
+openclaw gateway restart
+
+# 4. Check logs for successful plugin loading
 tail -f ~/.openclaw/logs/gateway.log | grep unbrowse
 ```
 
@@ -289,6 +453,69 @@ my-skill/
 ```
 
 ## Troubleshooting
+
+### Plugin not found: unbrowse
+
+**Error:** `plugins.entries.unbrowse: plugin not found: unbrowse`
+
+**Solution:** The plugin manifest uses the ID `unbrowse-openclaw`, not `unbrowse`. Update your config:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "unbrowse-openclaw": {
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+Then restart: `openclaw gateway restart`
+
+### Build fails or dist directory not created
+
+**Error:** Plugin source isn't compiled to JavaScript
+
+**Solution:** Build the plugin before loading:
+
+```bash
+cd /path/to/unbrowse-openclaw
+
+# Using bun (recommended)
+bun run tsc -p tsconfig.json
+
+# Or using npm
+npm run build
+
+# Verify dist directory was created
+ls -la dist/
+
+# Should show:
+# index.js
+# index.d.ts
+# src/ (directory)
+```
+
+### Plugin loads but tools not available
+
+**Symptom:** Plugin shows as "loaded" but tools don't work
+
+**Solution:** Check gateway logs for registration details:
+
+```bash
+# Restart gateway
+openclaw gateway restart
+
+# Check logs
+tail -50 ~/.openclaw/logs/gateway.log | grep unbrowse
+
+# Should see:
+# [plugins] [unbrowse] Plugin registered (13 tools, auto-discover)
+```
+
+If you see errors, check that the `dist/index.js` file exists and is valid.
 
 ### "Given napi value is not an array" or "Failed to convert JavaScript value"
 
