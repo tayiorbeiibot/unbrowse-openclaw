@@ -1,0 +1,12 @@
+id: bd-cleanup-docs
+description: Update documentation to reflect removal of marketplace features.
+context:
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Read `README.md`. Remove marketplace sections, wallet setup, and crypto keywords.
+    2. Read `docs/ARCHITECTURE.md`. Remove "Marketplace & Payments" section.
+    3. Create `MIGRATION.md` explaining that marketplace features are removed in v0.6.0.
+    4. Update `openclaw.plugin.json` if it references wallet config.
+acceptance_criteria:
+  - Docs match the new clean reality

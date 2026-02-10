@@ -1,0 +1,13 @@
+id: bd-fix-build-errors
+description: Fix compilation errors discovered during verification.
+context:
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Read `index.ts` and remove `type PublishPayload` from the import statement on line ~31.
+    2. Read `package.json` and add `"ws": "^8.18.0"` to dependencies and `"@types/ws": "^8.5.12"` to devDependencies.
+    3. Run `npm install` (or bun install).
+    4. Run `npm run build` (tsc) to verify fixes.
+acceptance_criteria:
+  - Build succeeds
+  - No missing module errors

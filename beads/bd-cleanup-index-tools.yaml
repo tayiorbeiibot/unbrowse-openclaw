@@ -1,0 +1,21 @@
+id: bd-cleanup-index-tools
+description: Remove wallet, publish, and search tools from index.ts.
+context:
+  file: index.ts
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Read `index.ts`.
+    2. Identify and remove the tool definitions for:
+       - `unbrowse_wallet` (approx lines 2575-2805)
+       - `unbrowse_publish` (approx lines 2066-2210)
+       - `unbrowse_search` (approx lines 2203-2400)
+    3. Remove the schema constants:
+       - `WALLET_SCHEMA`
+       - `PUBLISH_SCHEMA`
+       - `SEARCH_SCHEMA`
+    4. Remove the tool descriptions in the `tools` array or metadata.
+    5. Save `index.ts`.
+acceptance_criteria:
+  - Tools are gone from index.ts
+  - File parses validly

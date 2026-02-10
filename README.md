@@ -2,21 +2,21 @@
 
 **Open source API reverse engineering for OpenClaw.**
 
-Unbrowse is an [OpenClaw](https://github.com/lekt9/openclaw) extension that captures API traffic from any website and turns it into monetizable skills for AI agents. Browse a site, capture the API calls, generate skills, and publish them to the marketplace to earn USDC on every download.
+Unbrowse is an [OpenClaw](https://github.com/lekt9/openclaw) extension that captures API traffic from any website and turns it into reusable skills for AI agents. Browse a site, capture the API calls, generate skills, and replay them instantly.
 
-> **🔒 Security Note:** Unbrowse runs locally and accesses browser sessions to automate logins. All data stays on your machine — nothing is transmitted externally unless you explicitly publish to the marketplace. See [SECURITY.md](SECURITY.md) for full details on what's accessed and why.
+> **🔒 Security Note:** Unbrowse runs locally and accesses browser sessions to automate logins. All data stays on your machine. See [SECURITY.md](SECURITY.md) for full details on what's accessed and why.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        UNBROWSE                             │
 │          Open Source API Reverse Engineering                │
 │                                                             │
-│   Capture ──► Generate ──► Publish ──► Earn                │
-│       │          │           │          │                   │
-│       ▼          ▼           ▼          ▼                   │
-│   API traffic  skills    marketplace   USDC                │
-│   auth headers schemas   x402 payments 70% revenue         │
-│   payloads     docs      Solana        per download        │
+│   Capture ──► Generate ──► Replay                          │
+│       │          │           │                              │
+│       ▼          ▤           ▼                              │
+│   API traffic  skills    Direct HTTP                       │
+│   auth headers schemas   0.3s response                     │
+│   payloads     docs      95% reliable                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,7 +77,7 @@ openclaw gateway restart
 
 ## Quick Start — No Config Needed! 🚀
 
-**Unbrowse works immediately after installation.** No API key required for core features:
+**Unbrowse works immediately after installation.** No API key required:
 
 ```bash
 # Install and start using right away
@@ -87,7 +87,7 @@ openclaw plugins install @getfoundry/unbrowse-openclaw
 "Capture the API from airbnb.com"
 ```
 
-### What Needs What
+### What You Can Do
 
 | Feature | Requirements |
 |---------|-------------|
@@ -95,23 +95,6 @@ openclaw plugins install @getfoundry/unbrowse-openclaw
 | **Generate skills** | ✅ Nothing — works out of box |
 | **Replay captured APIs** | ✅ Nothing — uses your captured auth |
 | **Browse & login** | ✅ Nothing — uses your Chrome profile |
-| **Search marketplace** | ✅ Nothing — free to search |
-| **Download from marketplace** | 💰 Solana wallet + USDC ($0.01/skill) |
-| **Publish to marketplace** | 💰 Solana wallet (earn 70% revenue) |
-
-### Setting Up Marketplace (Optional)
-
-Only needed if you want to download/publish skills to the marketplace:
-
-```bash
-# Create a Solana wallet for marketplace transactions
-unbrowse_wallet action="create"
-
-# Or use your existing wallet
-unbrowse_wallet action="set_creator" wallet="<your-solana-address>"
-```
-
-> **Note:** The `SOLANA_PRIVATE_KEY` and `UNBROWSE_API_KEY` environment variables are only for advanced marketplace features. Basic capture, generation, and replay work without any configuration.
 
 ## How It Works
 
@@ -144,25 +127,18 @@ AI analyzes captured traffic and generates production-ready skills:
 unbrowse_generate_skill domain="twitter.com"
 ```
 
-### 3. Publish
+### 3. Replay
 
-Push skills to the marketplace with optional pricing:
+Execute captured APIs directly via HTTP — no browser needed:
+- 0.3 second response times
+- 95% reliability
+- Auto-refresh expired auth
+- Works offline after capture
 
 ```bash
-# Free skill (default)
-unbrowse_publish name="twitter-timeline"
-
-# Paid skill ($2.50 USDC)
-unbrowse_publish name="twitter-timeline" price="2.50"
+# Replay a captured endpoint
+unbrowse_replay service="twitter" endpoint="GET /api/timeline"
 ```
-
-### 4. Earn
-
-When other agents download your skill:
-- **70%** goes to you (the creator)
-- **30%** goes to the platform
-
-Payments are instant via x402 protocol on Solana (USDC).
 
 ## Tools
 
@@ -180,16 +156,7 @@ Payments are instant via x402 protocol on Solana (USDC).
 | Tool | Description |
 |------|-------------|
 | `unbrowse_generate_skill` | Generate skill from captured endpoints |
-| `unbrowse_install` | Install a skill from the marketplace |
-| `unbrowse_replay` | Execute API calls using installed skills |
-
-### Marketplace
-
-| Tool | Description |
-|------|-------------|
-| `unbrowse_search` | Search the skill marketplace |
-| `unbrowse_publish` | Publish a skill (free or paid) |
-| `unbrowse_wallet` | Manage your Solana wallet for payments |
+| `unbrowse_replay` | Execute API calls using captured skills |
 
 ### Session Management
 
@@ -234,37 +201,6 @@ unbrowse_workflow_record action="stop"
 unbrowse_workflow_learn sessionId="session-123..."
 ```
 
-## Earnings Model
-
-**Pay per sale. Buyers own the skill forever.**
-
-When an agent purchases a skill:
-- **70%** goes to the creator
-- **30%** goes to the platform
-
-Payments are instant via x402 protocol on Solana (USDC).
-
-```
-┌─────────────────────────────────────────────────┐
-│              EARNINGS BREAKDOWN                 │
-├─────────────────────────────────────────────────┤
-│  Creator:  70%  ─ Instant payout on sale        │
-│  Platform: 30%  ─ Infrastructure & marketplace  │
-└─────────────────────────────────────────────────┘
-```
-
-### Quality Tiers (Marketplace Ranking)
-
-Success rate affects marketplace visibility. Higher quality = more sales.
-
-| Tier | Success Rate | Visibility |
-|------|-------------|------------|
-| Gold | 95%+ | Featured, top ranking |
-| Silver | 85%+ | High visibility |
-| Bronze | 70%+ | Standard listing |
-| Unranked | 50%+ | Lower ranking |
-| Poor | <50% | Hidden from search |
-
 ## Configuration
 
 Full config example:
@@ -278,12 +214,6 @@ Full config example:
         "config": {
           "skillsOutputDir": "~/.openclaw/skills",
           "autoDiscover": true,
-          "skillIndexUrl": "https://index.unbrowse.ai",
-          "marketplace": {
-            "creatorWallet": "YOUR_SOLANA_WALLET_ADDRESS",
-            "solanaPrivateKey": "YOUR_BASE58_PRIVATE_KEY",
-            "defaultPrice": "0"
-          },
           "browser": {
             "useApiKey": "bu_...",
             "proxyCountry": "us"
@@ -302,10 +232,6 @@ Full config example:
 |--------|---------|-------------|
 | `skillsOutputDir` | `~/.openclaw/skills` | Where generated skills are saved |
 | `autoDiscover` | `true` | Auto-generate skills when browsing APIs |
-| `skillIndexUrl` | `https://index.unbrowse.ai` | Marketplace API URL |
-| `marketplace.creatorWallet` | - | Solana address to receive USDC |
-| `marketplace.solanaPrivateKey` | - | Private key for x402 payments |
-| `marketplace.defaultPrice` | `"0"` | Default price for new skills |
 | `browser.useApiKey` | - | Browser Use API key for stealth |
 | `browser.proxyCountry` | `"us"` | Proxy location for stealth browser |
 | `credentialSource` | `"none"` | Password lookup: none/keychain/1password |
@@ -320,27 +246,6 @@ Full config example:
 
 See [SECURITY.md](SECURITY.md) for detailed explanations of each feature.
 
-## x402 Payment Protocol
-
-Unbrowse uses the x402 protocol for machine-to-machine payments:
-
-```
-1. Agent requests skill download
-2. Server returns HTTP 402 with payment requirements
-3. Agent signs USDC transaction on Solana
-4. Agent retries with signed transaction in X-Payment header
-5. Server verifies on-chain, returns skill content
-```
-
-No intermediaries. Direct creator payment. Instant settlement.
-
-### Pricing
-
-| Type | Price | Description |
-|------|-------|-------------|
-| Free | $0.00 | Default — maximum adoption |
-| Paid | $0.10 - $100 | Creator sets price, earns 70% |
-
 ## Platform Support
 
 Unbrowse works on all OpenClaw-compatible platforms:
@@ -350,17 +255,6 @@ Unbrowse works on all OpenClaw-compatible platforms:
 | OpenClaw | `~/.openclaw/openclaw.json` | `openclaw plugins install @getfoundry/unbrowse-openclaw` |
 | Clawdbot | `~/.clawdbot/clawdbot.json` | `clawdbot plugins install @getfoundry/unbrowse-openclaw` |
 | Moltbot | `~/.moltbot/moltbot.json` | `moltbot plugins install @getfoundry/unbrowse-openclaw` |
-
-## Cloud Deployment
-
-For self-hosting the marketplace server, see `server/` directory:
-
-```bash
-cd server
-docker compose up -d
-```
-
-Default port: 4111
 
 ## Development
 
@@ -398,16 +292,12 @@ my-skill/
 
 ### "Given napi value is not an array" or "Failed to convert JavaScript value"
 
-This error occurs on **Node.js v24+** due to N-API compatibility issues with the `@solana/web3.js` native bindings.
+This error occurred in older versions (v0.5.x and earlier) due to N-API compatibility issues with Solana native bindings. This has been fixed in v0.6.0+.
 
-**Solution:** Use Node.js v22 LTS (Long Term Support)
+**Solution:** Update to the latest version:
 
 ```bash
-# If using nvm
-nvm install 22
-nvm use 22
-
-# Then restart the gateway
+openclaw plugins update @getfoundry/unbrowse-openclaw
 openclaw gateway restart
 ```
 
@@ -422,14 +312,6 @@ openclaw plugins update @getfoundry/unbrowse-openclaw
 ### unbrowse_skills returns undefined
 
 Usually a Node version issue. See the Node.js v24+ fix above.
-
-### Wallet operations fail
-
-Wallet/marketplace features require:
-1. Node.js v22 or earlier (not v24+)
-2. A funded Solana wallet (for downloads)
-
-Basic capture, generation, and replay work without a wallet.
 
 ### Chrome won't connect
 
@@ -493,4 +375,4 @@ MIT
 
 ---
 
-*Built for OpenClaw. Powered by x402.*
+*Built for OpenClaw.*

@@ -12,8 +12,7 @@ Unbrowse is a self-learning browser agent that captures API traffic from website
 4. [Skill Generation Pipeline](#skill-generation-pipeline)
 5. [Authentication Handling](#authentication-handling)
 6. [Browser Connection Strategies](#browser-connection-strategies)
-7. [Marketplace & Payments](#marketplace--payments)
-8. [Configuration](#configuration)
+7. [Configuration](#configuration)
 
 ---
 
@@ -66,7 +65,6 @@ parseHar() → Extract endpoints, auth headers, cookies
   ↓
 generateSkill() → SKILL.md + auth.json + api.ts
   ↓
-  ├→ Auto-publish to marketplace (if wallet configured)
   └→ Store credentials in encrypted vault
   ↓
 [unbrowse_replay executes APIs]
@@ -103,7 +101,6 @@ generateSkill() → SKILL.md + auth.json + api.ts
 4. Detects OpenAPI/Swagger specs
 5. Auto-tests GET endpoints to verify
 6. Generates skill files
-7. Auto-publishes if wallet configured
 
 ---
 
@@ -245,53 +242,6 @@ Returns: Local skills with endpoint counts and auth methods.
 - CAPTCHA/Cloudflare challenges
 
 **Returns:** Session ID, CDP URL (for Playwright), live view URL
-
----
-
-### unbrowse_publish
-
-**Publish skill to marketplace.**
-
-```typescript
-{
-  service: string    // Required: skill name
-  skillsDir?: string // Skills directory
-}
-```
-
-Published: SKILL.md, endpoints, auth method type, TypeScript template, creator wallet.
-**NOT published:** Actual credentials.
-
----
-
-### unbrowse_search
-
-**Search and install skills from marketplace.**
-
-```typescript
-{
-  query?: string   // Search term
-  tags?: string    // Comma-separated filter tags
-  install?: string // Skill ID to download
-}
-```
-
-- **Search:** Free
-- **Install:** $0.01 USDC via x402 payment
-
----
-
-### unbrowse_wallet
-
-**Manage Solana wallet for marketplace.**
-
-```typescript
-{
-  action: "status" | "setup" | "set_creator" | "set_payer"
-  wallet?: string     // Solana address (for set_creator)
-  privateKey?: string // Base58 private key (for set_payer)
-}
-```
 
 ---
 
@@ -472,42 +422,6 @@ interface StealthSession {
 
 ---
 
-## Marketplace & Payments
-
-### Server Architecture (`server/`)
-
-**Endpoints:**
-| Route | Auth | Description |
-|-------|------|-------------|
-| `GET /skills/search` | Free | Full-text search |
-| `GET /skills/:id/summary` | Free | Endpoint list |
-| `GET /skills/:id/download` | x402 | Full skill package |
-| `POST /skills/publish` | Free | Publish skill |
-| `GET /health` | Free | Health check |
-
-### x402 Payment Protocol
-
-HTTP 402 Payment Required with Solana USDC:
-
-**Flow:**
-1. Client requests `/skills/:id/download`
-2. Server returns 402 with payment requirements
-3. Client signs Solana transaction
-4. Client retries with `X-Payment` header
-5. Server verifies payment on-chain
-6. Server returns skill package
-
-**Payment split:**
-```
-Skill creator:  30%
-Platform:       65%
-Gas fees:        5%
-```
-
-**Price:** $0.01 USDC per download
-
----
-
 ## Configuration
 
 ### Plugin Config (`clawdbot.json`)
@@ -522,9 +436,6 @@ Gas fees:        5%
           "browserPort": 18791,
           "browserUseApiKey": "your-browserbase-key",
           "autoDiscover": true,
-          "skillIndexUrl": "https://skills.unbrowse.ai",
-          "creatorWallet": "your-solana-address",
-          "skillIndexSolanaPrivateKey": "base58-key",
           "credentialSource": "keychain"
         }
       }
@@ -537,9 +448,6 @@ Gas fees:        5%
 
 | Variable | Description |
 |----------|-------------|
-| `UNBROWSE_INDEX_URL` | Skill marketplace URL |
-| `UNBROWSE_CREATOR_WALLET` | Solana address for earnings |
-| `UNBROWSE_SOLANA_PRIVATE_KEY` | Base58 private key for payments |
 | `UNBROWSE_CREDENTIAL_SOURCE` | "keychain", "1password", "vault" |
 
 ### Credential Sources
@@ -565,7 +473,6 @@ Gas fees:        5%
 | `src/stealth-browser.ts` | BrowserBase cloud browser |
 | `src/profile-capture.ts` | Playwright network capture |
 | `src/session-login.ts` | Credential-based login |
-| `src/skill-index.ts` | Marketplace client |
 | `src/credential-providers.ts` | Keychain/1password/vault lookup |
 | `src/dom-service.ts` | Browser element indexing |
 | `src/site-crawler.ts` | Link crawling, OpenAPI detection |

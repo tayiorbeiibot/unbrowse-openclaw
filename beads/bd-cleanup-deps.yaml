@@ -1,0 +1,20 @@
+id: bd-cleanup-deps
+description: Remove crypto dependencies and marketplace scripts from package.json.
+context:
+  file: package.json
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Read package.json.
+    2. Remove the following dependencies:
+       - @solana/spl-token
+       - @solana/web3.js
+       - bs58
+       - tweetnacl
+    3. Update "keywords" to remove: "skill-marketplace", "x402", "solana", "usdc".
+    4. Update "description" to remove "monetizable".
+    5. Write the updated package.json.
+    6. Run `npm install` (or `bun install`) to update the lockfile.
+acceptance_criteria:
+  - No crypto deps in package.json
+  - Clean install succeeds

@@ -2,7 +2,7 @@
   "id": "unbrowse-openclaw",
   "name": "Unbrowse",
   "main": "dist/index.js",
-  "description": "Open source API reverse engineering for OpenClaw. Capture any API and turn it into monetizable skills for AI agents.",
+  "description": "Open source API reverse engineering for OpenClaw. Capture any API and turn it into reusable skills for AI agents.",
   "version": "0.5.6",
   "repository": "github:lekt9/unbrowse-openclaw",
   "configSchema": {
@@ -22,29 +22,6 @@
         "type": "boolean",
         "default": true,
         "description": "Automatically generate skills when the agent browses APIs"
-      },
-      "skillIndexUrl": {
-        "type": "string",
-        "default": "https://index.unbrowse.ai",
-        "description": "Cloud skill marketplace API URL"
-      },
-      "marketplace": {
-        "type": "object",
-        "properties": {
-          "creatorWallet": {
-            "type": "string",
-            "description": "Solana wallet address for receiving USDC payments"
-          },
-          "solanaPrivateKey": {
-            "type": "string",
-            "description": "Base58-encoded Solana private key for x402 payments"
-          },
-          "defaultPrice": {
-            "type": "string",
-            "default": "0",
-            "description": "Default price for published skills (0 = free, or $0.10-$100 USDC)"
-          }
-        }
       },
       "browser": {
         "type": "object",
@@ -81,25 +58,6 @@
     "autoDiscover": {
       "label": "Auto-Discover Skills",
       "help": "Automatically generate skills when browsing APIs"
-    },
-    "skillIndexUrl": {
-      "label": "Skill Marketplace URL",
-      "help": "Cloud skill marketplace API endpoint"
-    },
-    "marketplace.creatorWallet": {
-      "label": "Creator Wallet (Solana)",
-      "help": "Your Solana wallet address for receiving USDC when others download your skills",
-      "placeholder": "ABC123..."
-    },
-    "marketplace.solanaPrivateKey": {
-      "label": "Payment Private Key",
-      "help": "Base58-encoded Solana private key for paying x402 USDC when downloading paid skills",
-      "sensitive": true
-    },
-    "marketplace.defaultPrice": {
-      "label": "Default Skill Price",
-      "help": "Default price when publishing skills (0 = free)",
-      "placeholder": "0"
     },
     "browser.useApiKey": {
       "label": "Browser Use API Key",

@@ -1,0 +1,65 @@
+name: Unbrowse Cleanup
+context:
+  repo_path: /home/ubuntu/Projects/unbrowse
+  cleanup_plan: /home/ubuntu/Projects/unbrowse/REF_CLEANUP_PLAN.md
+
+beads:
+  - id: bd-cleanup-deps
+    description: Remove crypto dependencies and marketplace scripts from package.json.
+    acceptance_criteria:
+      - Removed @solana/spl-token, @solana/web3.js, bs58, tweetnacl from dependencies
+      - Removed marketplace-related scripts (if any)
+      - Updated keywords and description in package.json
+      - npm install succeeds without errors
+
+  - id: bd-cleanup-web
+    description: Delete the entire server/web directory (React marketplace frontend).
+    acceptance_criteria:
+      - Directory server/web/ is gone
+      - No references to server/web/ in other files (e.g. build scripts)
+
+  - id: bd-cleanup-index-tools
+    description: Remove wallet, publish, and search tools from index.ts.
+    acceptance_criteria:
+      - Removed unbrowse_wallet tool definition and handler
+      - Removed unbrowse_publish tool definition and handler
+      - Removed unbrowse_search tool definition and handler
+      - Removed WALLET_SCHEMA, PUBLISH_SCHEMA, SEARCH_SCHEMA definitions
+      - Removed tool descriptions for deleted tools
+
+  - id: bd-cleanup-index-logic
+    description: Remove wallet generation, auto-publish logic, and config from index.ts.
+    acceptance_criteria:
+      - Removed generateNewWallet() and ensureWallet()
+      - Removed autoPublishSkill() function
+      - Removed auto-publish hooks in AutoDiscovery constructor
+      - Removed wallet config variables (creatorWallet, solanaPrivateKey)
+      - Removed auto-publish calls in capture/learn success paths
+
+  - id: bd-cleanup-skill-index
+    description: Refactor src/skill-index.ts to remove payment and publishing logic.
+    acceptance_criteria:
+      - Removed buildAndSignPayment(), download(), publish(), update(), delete()
+      - Removed signMessage() and Solana imports
+      - Removed analytics tracking (installation/execution)
+      - Kept search() and getSkillSummary() for read-only discovery
+      - File compiles without errors
+
+  - id: bd-cleanup-docs
+    description: Update documentation to reflect removal of marketplace features.
+    acceptance_criteria:
+      - README.md updated (no marketplace/wallet sections)
+      - docs/ARCHITECTURE.md updated (no marketplace section)
+      - docs/POSITIONING.md updated (if exists)
+      - Added MIGRATION.md draft
+
+  - id: bd-verify
+    description: Verify the cleanup by running tests and checking for leftover references.
+    acceptance_criteria:
+      - Grep for "wallet", "solana", "marketplace" returns no code hits
+      - npm run build succeeds
+      - Basic capture test works (if possible to run locally)
+
+dependencies:
+  bd-cleanup-index-logic: [bd-cleanup-index-tools]
+  bd-verify: [bd-cleanup-deps, bd-cleanup-web, bd-cleanup-index-logic, bd-cleanup-skill-index, bd-cleanup-docs]

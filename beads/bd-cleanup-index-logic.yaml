@@ -1,0 +1,19 @@
+id: bd-cleanup-index-logic
+description: Remove wallet generation, auto-publish logic, and config from index.ts.
+context:
+  file: index.ts
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Read `index.ts`.
+    2. Remove functions:
+       - `generateNewWallet()`
+       - `ensureWallet()`
+       - `autoPublishSkill()`
+    3. Remove `onSkillGenerated` callback in `AutoDiscovery` constructor (or the auto-publish logic inside it).
+    4. Remove calls to `autoPublishSkill()` in `unbrowse_capture` and `unbrowse_learn`.
+    5. Remove wallet config variables (`creatorWallet`, `solanaPrivateKey`).
+    6. Save `index.ts`.
+acceptance_criteria:
+  - No wallet generation code
+  - No auto-publish code

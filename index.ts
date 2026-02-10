@@ -14,9 +14,6 @@
  *   unbrowse_learn     — Parse HAR file → generate internal API skill
  *   unbrowse_skills    — List captured internal API skills and their endpoints
  *   unbrowse_auth      — Extract auth from running browser (session cookies, tokens)
- *   unbrowse_publish   — Share internal API skill to marketplace
- *   unbrowse_search    — Find internal API skills others have captured
- *   unbrowse_wallet    — Manage wallet for marketplace transactions
  *
  * Hooks:
  *   after_tool_call    — Auto-captures internal APIs when browsing
@@ -31,7 +28,7 @@ import { parseHar } from "./src/har-parser.js";
 import { generateSkill } from "./src/skill-generator.js";
 import { fetchBrowserCookies, fetchCapturedRequests, startCdpHeaderListener } from "./src/cdp-capture.js";
 import { AutoDiscovery } from "./src/auto-discover.js";
-import { SkillIndexClient, type PublishPayload } from "./src/skill-index.js";
+import { SkillIndexClient } from "./src/skill-index.js";
 import { sanitizeApiTemplate, extractEndpoints, extractPublishableAuth } from "./src/skill-sanitizer.js";
 import { loginAndCapture, type LoginCredentials } from "./src/session-login.js";
 import {
@@ -171,62 +168,6 @@ const REPLAY_SCHEMA = {
 const SKILLS_SCHEMA = {
   type: "object" as const,
   properties: {},
-  required: [] as string[],
-};
-
-const PUBLISH_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    service: {
-      type: "string" as const,
-      description: "Service name (skill directory name) to publish to the cloud index",
-    },
-    skillsDir: {
-      type: "string" as const,
-      description: "Skills directory (default: ~/.openclaw/skills)",
-    },
-    price: {
-      type: "string" as const,
-      description: "Price in USDC (e.g. '0' for free, '1.50' for $1.50). Default is free.",
-    },
-  },
-  required: ["service"],
-};
-
-const SEARCH_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    query: {
-      type: "string" as const,
-      description: "Search query — skill name, service, domain, or description",
-    },
-    install: {
-      type: "string" as const,
-      description: "Skill ID to download and install locally",
-    },
-  },
-  required: [] as string[],
-};
-
-const WALLET_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    action: {
-      type: "string" as const,
-      description:
-        'Action: "status" (show wallet config + balances), "create" (generate a new Solana keypair), ' +
-        '"set_creator" (use an existing wallet address for earnings), "set_payer" (set private key for paying downloads), ' +
-        '"export" (reveal private key for backup - SECURITY: back up before funding!)',
-    },
-    wallet: {
-      type: "string" as const,
-      description: "Solana wallet address (for set_creator action - your existing wallet)",
-    },
-    privateKey: {
-      type: "string" as const,
-      description: "Base58-encoded Solana private key (for set_payer action)",
-    },
-  },
   required: [] as string[],
 };
 
@@ -551,8 +492,6 @@ const plugin = {
     const defaultOutputDir = (cfg.skillsOutputDir as string) ?? join(homedir(), ".openclaw", "skills");
     const autoDiscoverEnabled = (cfg.autoDiscover as boolean) ?? true;
     const skillIndexUrl = (cfg.skillIndexUrl as string) ?? process.env.UNBROWSE_INDEX_URL ?? "https://index.unbrowse.ai";
-    let creatorWallet = (cfg.creatorWallet as string) ?? process.env.UNBROWSE_CREATOR_WALLET;
-    let solanaPrivateKey = (cfg.skillIndexSolanaPrivateKey as string) ?? process.env.UNBROWSE_SOLANA_PRIVATE_KEY;
     const credentialSourceCfg = (cfg.credentialSource as string) ?? process.env.UNBROWSE_CREDENTIAL_SOURCE ?? "none";
     const vaultDbPath = join(homedir(), ".openclaw", "unbrowse", "vault.db");
     const credentialProvider = createCredentialProvider(credentialSourceCfg, vaultDbPath);
@@ -572,181 +511,14 @@ const plugin = {
       logger.info("[unbrowse] Desktop automation ENABLED (opt-in)");
     }
 
-    // ── Wallet Setup Helpers ──────────────────────────────────────────────
-    // Generates a new Solana keypair and saves it to config.
-    // Only called when user explicitly chooses to create a new wallet.
-    async function generateNewWallet(): Promise<{ publicKey: string; privateKey: string }> {
-      let Keypair: any;
-      let bs58: any;
-      try {
-        ({ Keypair } = await import("@solana/web3.js"));
-        bs58 = await import("bs58");
-      } catch (err) {
-        throw new Error(
-          `Solana native bindings failed to load (Node ${process.version}). ` +
-          `This is a known issue with @solana/web3.js on newer Node versions. ` +
-          `Try Node v22 LTS, or set creatorWallet manually in plugin config. ` +
-          `Original error: ${(err as Error).message}`
-        );
-      }
-      const keypair = Keypair.generate();
-      const publicKey = keypair.publicKey.toBase58();
-      const privateKeyB58 = bs58.default.encode(keypair.secretKey);
-
-      // Save to plugin config via runtime
-      const currentConfig = await api.runtime.config.loadConfig();
-      const pluginEntries = (currentConfig as any).plugins?.entries ?? {};
-      const unbrowseEntry = pluginEntries["unbrowse-openclaw"] ?? {};
-      const unbrowseConfig = unbrowseEntry.config ?? {};
-
-      unbrowseConfig.creatorWallet = publicKey;
-      unbrowseConfig.skillIndexSolanaPrivateKey = privateKeyB58;
-      creatorWallet = publicKey;
-      solanaPrivateKey = privateKeyB58;
-      indexOpts.creatorWallet = publicKey;
-      indexOpts.solanaPrivateKey = privateKeyB58;
-
-      unbrowseEntry.config = unbrowseConfig;
-      pluginEntries["unbrowse-openclaw"] = unbrowseEntry;
-      (currentConfig as any).plugins = { ...(currentConfig as any).plugins, entries: pluginEntries };
-
-      await api.runtime.config.writeConfigFile(currentConfig);
-
-      logger.info(
-        `[unbrowse] Solana wallet created: ${publicKey}` +
-        ` — send USDC (Solana SPL) to this address to discover skills from the marketplace ($0.01/skill).` +
-        ` You also earn USDC when others download your published skills.`,
-      );
-
-      return { publicKey, privateKey: privateKeyB58 };
-    }
-
-    // Check if wallet is configured
-    function isWalletConfigured(): boolean {
-      return !!(creatorWallet && solanaPrivateKey);
-    }
-
-    // Legacy ensureWallet for backward compatibility with existing code
-    // Now only generates if both are missing (does not auto-generate on startup)
-    async function ensureWallet(): Promise<void> {
-      if (creatorWallet && solanaPrivateKey) return; // Already configured
-      await generateNewWallet();
-    }
-
     // ── Skill Index Client ─────────────────────────────────────────────────
-    // Use a shared opts object so wallet values stay in sync after auto-generation
-    const indexOpts: { indexUrl: string; creatorWallet?: string; solanaPrivateKey?: string } = {
-      indexUrl: skillIndexUrl,
-      creatorWallet,
-      solanaPrivateKey,
-    };
-    const indexClient = new SkillIndexClient(indexOpts);
-
-    // NOTE: Wallet is no longer auto-generated on startup.
-    // User must explicitly set up wallet via unbrowse_wallet tool.
-
-    // ── Auto-Publish Helper ────────────────────────────────────────────────
-    // Track server reachability to avoid repeated failed publish attempts
-    let serverReachable: boolean | null = null; // null = unknown, needs check
-    let lastReachabilityCheck = 0;
-    const REACHABILITY_CHECK_INTERVAL = 5 * 60 * 1000; // Re-check every 5 minutes
-
-    /** Publish a skill to the cloud index if creatorWallet is configured. */
-    async function autoPublishSkill(service: string, skillDir: string): Promise<string | null> {
-      if (!creatorWallet) return null;
-
-      // Check server reachability (with caching to avoid hammering)
-      const now = Date.now();
-      if (serverReachable === null || (serverReachable === false && now - lastReachabilityCheck > REACHABILITY_CHECK_INTERVAL)) {
-        lastReachabilityCheck = now;
-        serverReachable = await indexClient.healthCheck();
-        if (!serverReachable) {
-          logger.info(`[unbrowse] Skill marketplace unreachable — auto-publish disabled until server is available.`);
-        }
-      }
-
-      if (!serverReachable) {
-        // Silently skip — already logged once when we detected it was down
-        return null;
-      }
-
-      try {
-        const skillMd = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
-        const endpoints = extractEndpoints(skillMd);
-
-        let baseUrl = "";
-        let authMethodType = "Unknown";
-        const authJsonPath = join(skillDir, "auth.json");
-        if (existsSync(authJsonPath)) {
-          const pub = extractPublishableAuth(readFileSync(authJsonPath, "utf-8"));
-          baseUrl = pub.baseUrl;
-          authMethodType = pub.authMethodType;
-        }
-
-        // Collect scripts
-        const scripts: Record<string, string> = {};
-        const apiTsPath = join(skillDir, "scripts", "api.ts");
-        if (existsSync(apiTsPath)) {
-          scripts["api.ts"] = sanitizeApiTemplate(readFileSync(apiTsPath, "utf-8"));
-        }
-
-        // Extract description from SKILL.md frontmatter
-        let description = "";
-        const descMatch = skillMd.match(/^description:\s*>-?\s*\n([\s\S]*?)(?=\n\w|---)/m);
-        if (descMatch) {
-          description = descMatch[1].replace(/\n\s+/g, " ").trim();
-        } else {
-          // Build a meaningful fallback description
-          const endpointNames = endpoints.slice(0, 3).map((e: { method: string; path: string }) => e.path);
-          const capText = endpointNames.length > 0 ? ` Endpoints: ${endpointNames.join(", ")}.` : "";
-          description = `${service} skill for OpenClaw.${capText}`;
-        }
-
-        // Extract domain from baseUrl
-        let domain = "";
-        if (baseUrl) {
-          try {
-            domain = new URL(baseUrl).hostname;
-          } catch { /* skip */ }
-        }
-
-        const result = await indexClient.publish({
-          name: service,
-          description,
-          skillMd,
-          authType: authMethodType !== "Unknown" ? authMethodType : undefined,
-          scripts: Object.keys(scripts).length > 0 ? scripts : undefined,
-          serviceName: service,
-          domain: domain || undefined,
-          creatorWallet,
-          priceUsdc: "0", // Auto-published skills are free by default
-        });
-        logger.info(`[unbrowse] Auto-published: ${service} (${result.skill.skillId})`);
-        return result.skill.skillId;
-      } catch (err) {
-        const msg = (err as Error).message ?? "";
-        // If it's a connection error, mark server as unreachable
-        if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND") || msg.includes("timeout")) {
-          serverReachable = false;
-          lastReachabilityCheck = now;
-          logger.info(`[unbrowse] Skill marketplace unreachable — auto-publish disabled until server is available.`);
-        } else {
-          logger.warn(`[unbrowse] Auto-publish failed for ${service}: ${msg}`);
-        }
-        return null;
-      }
-    }
+    const indexClient = new SkillIndexClient({ indexUrl: skillIndexUrl });
 
     // ── Auto-Discovery Engine ─────────────────────────────────────────────
     const discovery = new AutoDiscovery({
       outputDir: defaultOutputDir,
       port: browserPort,
       logger,
-      onSkillGenerated: async (service, result) => {
-        if (result.changed) {
-          await autoPublishSkill(service, result.skillDir);
-        }
-      },
     });
 
     // ── Browser Session Tracking ────────────────────────────────────────────
@@ -1066,12 +838,6 @@ const plugin = {
               // Detect and save refresh token config
               detectAndSaveRefreshConfig((harData as any).log?.entries ?? [], join(result.skillDir, "auth.json"), logger);
 
-              // Auto-publish if skill content changed
-              let publishedVersion: string | null = null;
-              if (result.changed) {
-                publishedVersion = await autoPublishSkill(result.service, result.skillDir);
-              }
-
               const summaryLines = [
                 `Skill generated: ${result.service}`,
                 `Auth: ${result.authMethod}`,
@@ -1084,9 +850,6 @@ const plugin = {
                 `Auth headers: ${result.authHeaderCount} | Cookies: ${result.cookieCount}`,
                 `Installed: ${result.skillDir}`,
               );
-              if (publishedVersion) {
-                summaryLines.push(`Published: ${publishedVersion} (auto-synced to cloud index)`);
-              }
               summaryLines.push("", `Use ${toPascalCase(result.service)}Client from scripts/api.ts`);
 
               logger.info(`[unbrowse] Skill: ${result.service} (${result.endpointCount} endpoints)`);
@@ -1216,12 +979,6 @@ const plugin = {
               // Detect and save refresh token config
               detectAndSaveRefreshConfig(har.log?.entries ?? [], join(result.skillDir, "auth.json"), logger);
 
-              // Auto-publish if skill content changed
-              let publishedVersion: string | null = null;
-              if (result.changed) {
-                publishedVersion = await autoPublishSkill(result.service, result.skillDir);
-              }
-
               // Build summary
               const summaryLines = [
                 `Captured (${method}): ${requestCount} requests from ${p.urls.length} page(s)`,
@@ -1247,9 +1004,6 @@ const plugin = {
                 `Auth headers: ${result.authHeaderCount} | Cookies: ${result.cookieCount}`,
                 `Installed: ${result.skillDir}`,
               );
-              if (publishedVersion) {
-                summaryLines.push(`Published: ${publishedVersion} (auto-synced to cloud index)`);
-              }
 
               // Rate limit / bot detection warnings
               if (failureRate > 0.1 && failedRequests > 2) {
@@ -2042,326 +1796,20 @@ const plugin = {
               }
             } catch { /* dir doesn't exist */ }
 
-            // Wallet funding prompt
-            const walletNote = creatorWallet && !solanaPrivateKey
-              ? `\n\nWallet: ${creatorWallet}\nSend USDC (Solana) to this address to discover and download skills from other agents.`
-              : creatorWallet
-                ? `\n\nWallet: ${creatorWallet} (ready for marketplace)`
-                : "";
-
             if (skills.length === 0) {
-              return { content: [{ type: "text", text: `No skills discovered yet. Use unbrowse_learn, unbrowse_capture, or browse APIs to auto-discover.${walletNote}` }] };
+              return { content: [{ type: "text", text: `No skills discovered yet. Use unbrowse_learn, unbrowse_capture, or browse APIs to auto-discover.` }] };
             }
 
             const autoLabel = autoDiscoverEnabled ? " (auto-discover ON)" : "";
             return {
               content: [{
                 type: "text",
-                text: `Discovered skills (${skills.length})${autoLabel}:\n${skills.join("\n")}${walletNote}`,
+                text: `Discovered skills (${skills.length})${autoLabel}:\n${skills.join("\n")}`,
               }],
             };
           },
         },
 
-        // ── unbrowse_publish ───────────────────────────────────────────
-        {
-          name: "unbrowse_publish",
-          label: "Share Internal API",
-          description:
-            "Share a captured internal API skill to the marketplace. Publishes the endpoint structure, " +
-            "auth method, and documentation — credentials stay local (others need their own login). " +
-            "Useful when you've reverse-engineered an internal API that others might want to use. " +
-            "Set price='0' for free or price='1.50' for $1.50 USDC (you earn 70%).",
-          parameters: PUBLISH_SCHEMA,
-          async execute(_toolCallId: string, params: unknown) {
-            const p = params as { service: string; skillsDir?: string };
-
-            if (!creatorWallet) {
-              return {
-                content: [{
-                  type: "text",
-                  text: [
-                    "No wallet configured for publishing skills.",
-                    "",
-                    "To publish skills and earn USDC when others download them, you need a Solana wallet.",
-                    "",
-                    "Options:",
-                    '  1. Create a new wallet: unbrowse_wallet action="create"',
-                    '  2. Use existing wallet: unbrowse_wallet action="set_creator" wallet="<your-solana-address>"',
-                    "",
-                    "Once configured, try publishing again.",
-                  ].join("\n"),
-                }],
-              };
-            }
-
-            const skillsDir = p.skillsDir ?? defaultOutputDir;
-            const skillDir = join(skillsDir, p.service);
-            const skillMdPath = join(skillDir, "SKILL.md");
-            const authJsonPath = join(skillDir, "auth.json");
-            const apiTsPath = join(skillDir, "scripts", "api.ts");
-
-            if (!existsSync(skillMdPath)) {
-              return { content: [{ type: "text", text: `Skill not found: ${skillDir}. Generate it first with unbrowse_learn or unbrowse_capture.` }] };
-            }
-
-            try {
-              const skillMd = readFileSync(skillMdPath, "utf-8");
-              const endpoints = extractEndpoints(skillMd);
-
-              let baseUrl = "";
-              let authMethodType = "Unknown";
-
-              if (existsSync(authJsonPath)) {
-                const authStr = readFileSync(authJsonPath, "utf-8");
-                const pub = extractPublishableAuth(authStr);
-                baseUrl = pub.baseUrl;
-                authMethodType = pub.authMethodType;
-              }
-
-              // Collect scripts (api.ts and any other .ts files in scripts/)
-              const scripts: Record<string, string> = {};
-              if (existsSync(apiTsPath)) {
-                scripts["api.ts"] = sanitizeApiTemplate(readFileSync(apiTsPath, "utf-8"));
-              }
-
-              // Collect references (any .md files in references/)
-              const references: Record<string, string> = {};
-              const referencesDir = join(skillDir, "references");
-              if (existsSync(referencesDir)) {
-                for (const file of readdirSync(referencesDir)) {
-                  if (file.endsWith(".md")) {
-                    references[file] = readFileSync(join(referencesDir, file), "utf-8");
-                  }
-                }
-              }
-
-              // Extract description from SKILL.md frontmatter or generate one
-              let description = "";
-              const descMatch = skillMd.match(/^description:\s*>-?\s*\n([\s\S]*?)(?=\n\w|---)/m);
-              if (descMatch) {
-                description = descMatch[1].replace(/\n\s+/g, " ").trim();
-              } else {
-                // Build a meaningful fallback description
-                const endpointNames = endpoints.slice(0, 3).map((e: { method: string; path: string }) => e.path);
-                const capText = endpointNames.length > 0 ? ` Endpoints: ${endpointNames.join(", ")}.` : "";
-                description = `${p.service} skill for OpenClaw.${capText}`;
-              }
-
-              // Extract domain from baseUrl
-              let domain = "";
-              if (baseUrl) {
-                try {
-                  domain = new URL(baseUrl).hostname;
-                } catch { /* skip */ }
-              }
-
-              // Extract version hash from SKILL.md frontmatter
-              const versionHashMatch = skillMd.match(/versionHash:\s*"?([a-f0-9]+)"?/i);
-              const versionHash = versionHashMatch?.[1];
-
-              // Build payload following agentskills.io format
-              const payload: PublishPayload = {
-                name: p.service,
-                description,
-                skillMd,
-                authType: authMethodType !== "Unknown" ? authMethodType : undefined,
-                scripts: Object.keys(scripts).length > 0 ? scripts : undefined,
-                references: Object.keys(references).length > 0 ? references : undefined,
-                serviceName: p.service,
-                domain: domain || undefined,
-                creatorWallet,
-                priceUsdc: (p as any).price ?? "0", // Default to free
-              };
-
-              const result = await indexClient.publish(payload);
-
-              const priceDisplay = (p as any).price && parseFloat((p as any).price) > 0
-                ? `$${parseFloat((p as any).price).toFixed(2)} USDC`
-                : "Free";
-              const summary = [
-                `Skill published to cloud marketplace`,
-                `Name: ${p.service}`,
-                `ID: ${result.skill.skillId}`,
-                versionHash ? `Version: ${versionHash}` : null,
-                `Price: ${priceDisplay}`,
-                `Endpoints: ${endpoints.length}`,
-                `Creator wallet: ${creatorWallet}`,
-                ``,
-                `Others can find and download this skill via unbrowse_search.`,
-                priceDisplay !== "Free" ? `You earn 70% ($${(parseFloat((p as any).price) * 0.7).toFixed(2)}) for each download.` : "",
-              ].filter(Boolean).join("\n");
-
-              logger.info(`[unbrowse] Published: ${p.service} → ${result.skill.skillId}`);
-              return { content: [{ type: "text", text: summary }] };
-            } catch (err) {
-              return { content: [{ type: "text", text: `Publish failed: ${(err as Error).message}` }] };
-            }
-          },
-        },
-
-        // ── unbrowse_search ────────────────────────────────────────────
-        {
-          name: "unbrowse_search",
-          label: "Find Internal APIs",
-          description:
-            "Search for internal API skills that others have reverse-engineered. " +
-            "Find endpoints for sites you need to access without doing the capture yourself. " +
-            "Searching is free. Installing costs $0.01 USDC. You'll still need your own " +
-            "login credentials — the skill just tells you which endpoints exist.",
-          parameters: SEARCH_SCHEMA,
-          async execute(_toolCallId: string, params: unknown) {
-            const p = params as { query?: string; install?: string };
-
-            // ── Install mode ──
-            if (p.install) {
-              try {
-                const pkg = await indexClient.download(p.install);
-
-                // Save locally using agentskills.io directory structure
-                const skillDir = join(defaultOutputDir, pkg.name);
-                const scriptsDir = join(skillDir, "scripts");
-                const referencesDir = join(skillDir, "references");
-                const { mkdirSync, writeFileSync } = await import("node:fs");
-                mkdirSync(scriptsDir, { recursive: true });
-                mkdirSync(referencesDir, { recursive: true });
-
-                // Write SKILL.md
-                writeFileSync(join(skillDir, "SKILL.md"), pkg.skillMd, "utf-8");
-
-                // Write scripts (api.ts and others)
-                if (pkg.scripts) {
-                  for (const [filename, content] of Object.entries(pkg.scripts)) {
-                    writeFileSync(join(scriptsDir, filename), content, "utf-8");
-                  }
-                }
-
-                // Write references
-                if (pkg.references) {
-                  for (const [filename, content] of Object.entries(pkg.references)) {
-                    writeFileSync(join(referencesDir, filename), content, "utf-8");
-                  }
-                }
-
-                // Create placeholder auth.json — user adds their own credentials
-                writeFileSync(join(skillDir, "auth.json"), JSON.stringify({
-                  service: pkg.name,
-                  baseUrl: pkg.domain ? `https://${pkg.domain}` : "",
-                  authMethod: pkg.authType || "Unknown",
-                  timestamp: new Date().toISOString(),
-                  notes: ["Downloaded from skill marketplace — add your own auth credentials"],
-                  headers: {},
-                  cookies: {},
-                }, null, 2), "utf-8");
-
-                discovery.markLearned(pkg.name);
-
-                // Track installation (best-effort, non-blocking)
-                const versionMatch = pkg.skillMd.match(/versionHash:\s*"?([a-f0-9]+)"?/i);
-                const versionHash = versionMatch?.[1];
-                indexClient.reportInstallation({
-                  skillId: p.install,
-                  versionHash,
-                  platform: process.platform,
-                  metadata: { source: "cli", category: pkg.category },
-                }).catch(() => { /* tracking is best-effort */ });
-
-                // Count endpoints from SKILL.md
-                const endpointCount = extractEndpoints(pkg.skillMd).length;
-
-                const summary = [
-                  `Skill installed: ${pkg.name}`,
-                  `Location: ${skillDir}`,
-                  `Endpoints: ${endpointCount}`,
-                  `Auth: ${pkg.authType || "Unknown"}`,
-                  pkg.category ? `Category: ${pkg.category}` : null,
-                  versionHash ? `Version: ${versionHash}` : null,
-                  ``,
-                  `Add your auth credentials to auth.json or use unbrowse_auth to extract from browser.`,
-                ].filter(Boolean).join("\n");
-
-                logger.info(`[unbrowse] Installed from marketplace: ${pkg.name}`);
-                return { content: [{ type: "text", text: summary }] };
-              } catch (err) {
-                const msg = (err as Error).message;
-                // If payment failed due to missing key or insufficient funds, prompt to fund wallet
-                if (msg.includes("private key") || msg.includes("x402") || msg.includes("payment")) {
-                  let walletHint: string;
-                  if (creatorWallet && solanaPrivateKey) {
-                    walletHint = [
-                      "",
-                      `Your wallet: ${creatorWallet}`,
-                      "Send USDC (Solana SPL) to this address to fund skill downloads.",
-                    ].join("\n");
-                  } else if (creatorWallet) {
-                    walletHint = [
-                      "",
-                      `Your wallet: ${creatorWallet}`,
-                      "No spending key configured. Options:",
-                      '  1. Generate a new keypair: unbrowse_wallet action="create"',
-                      '  2. Import existing key: unbrowse_wallet action="set_payer" privateKey="<base58-key>"',
-                    ].join("\n");
-                  } else {
-                    walletHint = [
-                      "",
-                      "No wallet configured. Options:",
-                      '  1. Create a new wallet: unbrowse_wallet action="create"',
-                      '  2. Use existing wallet: unbrowse_wallet action="set_creator" wallet="<address>"',
-                      '                          unbrowse_wallet action="set_payer" privateKey="<key>"',
-                    ].join("\n");
-                  }
-                  return { content: [{ type: "text", text: `Install failed: ${msg}${walletHint}` }] };
-                }
-                return { content: [{ type: "text", text: `Install failed: ${msg}` }] };
-              }
-            }
-
-            // ── Search mode ──
-            if (!p.query) {
-              return { content: [{ type: "text", text: "Provide a query to search, or install=<id> to download a skill." }] };
-            }
-
-            try {
-              const results = await indexClient.search(p.query, { limit: 10 });
-
-              if (results.skills.length === 0) {
-                return { content: [{ type: "text", text: `No skills found for "${p.query}". Try different keywords.` }] };
-              }
-
-              const lines = [
-                `Skill Marketplace (${results.total} results for "${p.query}"):`,
-                "",
-              ];
-
-              for (const skill of results.skills) {
-                const meta: string[] = [];
-                if (skill.category) meta.push(skill.category);
-                if (skill.authType) meta.push(skill.authType);
-                if (skill.domain) meta.push(skill.domain);
-                const metaStr = meta.length > 0 ? ` [${meta.join(", ")}]` : "";
-
-                lines.push(
-                  `  ${skill.name}${metaStr}`,
-                  `    ${skill.description?.slice(0, 100) || "No description"}`,
-                  `    ID: ${skill.skillId} | Downloads: ${skill.downloadCount}`,
-                );
-              }
-
-              lines.push("", `Use unbrowse_search with install="<skillId>" to download and install.`);
-
-              if (creatorWallet) {
-                lines.push(`\nYour wallet: ${creatorWallet}`);
-                if (!solanaPrivateKey) {
-                  lines.push("Send USDC (Solana SPL) to this address to fund skill downloads.");
-                }
-              }
-
-              return { content: [{ type: "text", text: lines.join("\n") }] };
-            } catch (err) {
-              return { content: [{ type: "text", text: `Search failed: ${(err as Error).message}` }] };
-            }
-          },
-        },
         // ── unbrowse_login ─────────────────────────────────────────────
         {
           name: "unbrowse_login",
@@ -2572,241 +2020,6 @@ const plugin = {
           },
         },
 
-        // ── unbrowse_wallet ────────────────────────────────────────────
-        {
-          name: "unbrowse_wallet",
-          label: "Wallet Setup",
-          description:
-            "Manage your Solana wallet for skill marketplace payments. " +
-            "Check status, create a new keypair, or use an existing wallet. " +
-            "The wallet earns USDC when others download your published skills, " +
-            "and pays USDC to download/discover skills from others.",
-          parameters: WALLET_SCHEMA,
-          async execute(_toolCallId: string, params: unknown) {
-            const p = params as { action?: string; wallet?: string; privateKey?: string };
-            const action = p.action ?? "status";
-
-            // "create" - generate a new wallet keypair
-            if (action === "create") {
-              if (creatorWallet && solanaPrivateKey) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: `Wallet already configured.\nCreator (earning): ${creatorWallet}\nPayer (spending): configured\n\nUse action="status" to check balances, or use action="set_creator" to switch to a different wallet.`,
-                  }],
-                };
-              }
-
-              try {
-                const { publicKey } = await generateNewWallet();
-                return {
-                  content: [{
-                    type: "text",
-                    text: [
-                      "New Solana wallet created and saved to config.",
-                      `Address: ${publicKey}`,
-                      "",
-                      "Fund this address with USDC to:",
-                      "  - Download and discover skills from the marketplace ($0.01/skill)",
-                      "  - Earn USDC when others download your published skills",
-                      "",
-                      "Send USDC (SPL) to this Solana address to get started.",
-                    ].join("\n"),
-                  }],
-                };
-              } catch (err) {
-                return { content: [{ type: "text", text: `Wallet creation failed: ${(err as Error).message}` }] };
-              }
-            }
-
-            // "setup" - legacy alias for "create" (backward compatibility)
-            if (action === "setup") {
-              if (creatorWallet && solanaPrivateKey) {
-                return {
-                  content: [{
-                    type: "text",
-                    text: `Wallet already configured.\nCreator (earning): ${creatorWallet}\nPayer (spending): configured\n\nUse action="status" to check balances.`,
-                  }],
-                };
-              }
-
-              try {
-                const { publicKey } = await generateNewWallet();
-                return {
-                  content: [{
-                    type: "text",
-                    text: [
-                      "Solana wallet generated and saved to config.",
-                      `Address: ${publicKey}`,
-                      "",
-                      "Fund this address with USDC to:",
-                      "  - Download and discover skills from the marketplace ($0.01/skill)",
-                      "  - Earn USDC when others download your published skills",
-                      "",
-                      "Send USDC (SPL) to this Solana address to get started.",
-                    ].join("\n"),
-                  }],
-                };
-              } catch (err) {
-                return { content: [{ type: "text", text: `Wallet setup failed: ${(err as Error).message}` }] };
-              }
-            }
-
-            if (action === "set_creator") {
-              if (!p.wallet) {
-                return { content: [{ type: "text", text: "Provide wallet= with a Solana address." }] };
-              }
-              try {
-                const currentConfig = await api.runtime.config.loadConfig();
-                const pluginEntries = (currentConfig as any).plugins?.entries ?? {};
-                const unbrowseEntry = pluginEntries["unbrowse-openclaw"] ?? {};
-                const unbrowseConfig = unbrowseEntry.config ?? {};
-                unbrowseConfig.creatorWallet = p.wallet;
-                unbrowseEntry.config = unbrowseConfig;
-                pluginEntries["unbrowse-openclaw"] = unbrowseEntry;
-                (currentConfig as any).plugins = { ...(currentConfig as any).plugins, entries: pluginEntries };
-                await api.runtime.config.writeConfigFile(currentConfig);
-                creatorWallet = p.wallet;
-                indexOpts.creatorWallet = p.wallet;
-                return { content: [{ type: "text", text: `Creator wallet set: ${p.wallet}\nYou'll earn USDC when others download your published skills.` }] };
-              } catch (err) {
-                return { content: [{ type: "text", text: `Failed to save: ${(err as Error).message}` }] };
-              }
-            }
-
-            if (action === "set_payer") {
-              if (!p.privateKey) {
-                return { content: [{ type: "text", text: "Provide privateKey= with a base58-encoded Solana private key." }] };
-              }
-              try {
-                // Validate the key
-                const { Keypair } = await import("@solana/web3.js");
-                const bs58 = await import("bs58");
-                const keypair = Keypair.fromSecretKey(bs58.default.decode(p.privateKey));
-                const publicKey = keypair.publicKey.toBase58();
-
-                const currentConfig = await api.runtime.config.loadConfig();
-                const pluginEntries = (currentConfig as any).plugins?.entries ?? {};
-                const unbrowseEntry = pluginEntries["unbrowse-openclaw"] ?? {};
-                const unbrowseConfig = unbrowseEntry.config ?? {};
-                unbrowseConfig.skillIndexSolanaPrivateKey = p.privateKey;
-                unbrowseEntry.config = unbrowseConfig;
-                pluginEntries["unbrowse-openclaw"] = unbrowseEntry;
-                (currentConfig as any).plugins = { ...(currentConfig as any).plugins, entries: pluginEntries };
-                await api.runtime.config.writeConfigFile(currentConfig);
-                solanaPrivateKey = p.privateKey;
-                indexOpts.solanaPrivateKey = p.privateKey;
-                return {
-                  content: [{
-                    type: "text",
-                    text: `Payer wallet set: ${publicKey}\nThis wallet will be used to pay for skill downloads from the marketplace.`,
-                  }],
-                };
-              } catch (err) {
-                return { content: [{ type: "text", text: `Invalid key or save failed: ${(err as Error).message}` }] };
-              }
-            }
-
-            // "export" - reveal private key for backup (SECURITY WARNING)
-            if (action === "export") {
-              if (!solanaPrivateKey) {
-                return { content: [{ type: "text", text: "No private key configured. Nothing to export." }] };
-              }
-              try {
-                const { Keypair } = await import("@solana/web3.js");
-                const bs58 = await import("bs58");
-                const keypair = Keypair.fromSecretKey(bs58.default.decode(solanaPrivateKey));
-                return {
-                  content: [{
-                    type: "text",
-                    text: [
-                      "⚠️  WALLET PRIVATE KEY - KEEP THIS SAFE!",
-                      "",
-                      `Address: ${keypair.publicKey.toBase58()}`,
-                      `Private Key: ${solanaPrivateKey}`,
-                      "",
-                      "SECURITY WARNINGS:",
-                      "  - Never share this private key with anyone",
-                      "  - Store it in a secure password manager",
-                      "  - Anyone with this key can drain your wallet",
-                      "  - Back this up BEFORE funding the wallet",
-                    ].join("\n"),
-                  }],
-                };
-              } catch (err) {
-                return { content: [{ type: "text", text: `Export failed: ${(err as Error).message}` }] };
-              }
-            }
-
-            // Default: status
-            const lines = ["Unbrowse Wallet Status", ""];
-
-            if (creatorWallet) {
-              lines.push(`Creator (earning): ${creatorWallet}`);
-            } else {
-              lines.push("Creator (earning): not configured");
-            }
-
-            if (solanaPrivateKey) {
-              try {
-                const { Keypair } = await import("@solana/web3.js");
-                const bs58 = await import("bs58");
-                const keypair = Keypair.fromSecretKey(bs58.default.decode(solanaPrivateKey));
-                lines.push(`Payer (spending):  ${keypair.publicKey.toBase58()}`);
-              } catch (err) {
-                const msg = (err as Error).message;
-                if (msg.includes("napi") || msg.includes("native") || msg.includes("NAPI")) {
-                  lines.push(`Payer (spending):  configured (native binding error — try Node v22 LTS)`);
-                } else {
-                  lines.push("Payer (spending):  configured (key decode failed)");
-                }
-              }
-            } else {
-              lines.push("Payer (spending):  not configured");
-            }
-
-            lines.push("");
-
-            if (!creatorWallet && !solanaPrivateKey) {
-              lines.push(
-                "No wallet configured. Choose one of the following options:",
-                "",
-                '  1. CREATE NEW WALLET: Use action="create" to generate a new Solana keypair',
-                '     - This will create a brand new wallet just for you',
-                "",
-                '  2. USE EXISTING WALLET: Use action="set_creator" with wallet="YOUR_ADDRESS"',
-                '     - Then use action="set_payer" with privateKey="YOUR_PRIVATE_KEY"',
-                '     - Use this if you already have a Solana wallet with USDC',
-                "",
-                "The wallet is used to earn and pay USDC for skill marketplace access.",
-              );
-            } else if (!solanaPrivateKey) {
-              lines.push(
-                'No payer key configured.',
-                "",
-                '  Option 1: Use action="create" to generate a new keypair',
-                '  Option 2: Use action="set_payer" with privateKey="YOUR_PRIVATE_KEY" to import existing',
-                "",
-                "A payer key is needed to download skills from the marketplace.",
-              );
-            } else if (!creatorWallet) {
-              lines.push(
-                'No creator wallet configured.',
-                "",
-                '  Use action="set_creator" with wallet="YOUR_ADDRESS" to set your earning address.',
-                "",
-                "A creator wallet lets you earn USDC when others download your skills.",
-              );
-            } else {
-              lines.push(
-                "Wallet ready. Fund the address with USDC to download/discover skills.",
-                "You earn USDC when others download your published skills.",
-              );
-            }
-
-            return { content: [{ type: "text", text: lines.join("\n") }] };
-          },
-        },
         // ── browse ───────────────────────────────────────────────────────
         // Task-focused browsing: complete user's task, learn APIs as byproduct
         {
@@ -3792,11 +3005,6 @@ const plugin = {
                   logger.info(
                     `[unbrowse] Interact → auto-skill "${result.service}" (${result.endpointCount} endpoints${result.diff ? `, ${result.diff}` : ""})`,
                   );
-
-                  // Auto-publish if changed
-                  if (result.changed) {
-                    autoPublishSkill(result.service, result.skillDir).catch(() => { });
-                  }
                 } catch (err) {
                   logger.warn(`[unbrowse] Interact skill generation failed: ${(err as Error).message}`);
                 }
@@ -4518,10 +3726,7 @@ const plugin = {
       "unbrowse_auth",
       "unbrowse_replay",
       "unbrowse_skills",
-      "unbrowse_publish",
-      "unbrowse_search",
       "unbrowse_login",
-      "unbrowse_wallet",
       "browser",
       "unbrowse_do",
       "unbrowse_desktop",
@@ -4600,8 +3805,6 @@ const plugin = {
     // Skip in diagnostic mode to prevent deadlocks
     api.on("before_agent_start", async () => {
       if (!isGatewayService || isDiagnosticMode) return {};
-      // Wait for wallet generation to complete (may still be running)
-      await ensureWallet().catch(() => { });
 
       const lines: string[] = [
         "[Internal API Access] Reverse-engineer and call internal APIs from any website.",
@@ -4609,11 +3812,6 @@ const plugin = {
         "Workflow: unbrowse_skills (check existing) → unbrowse_capture (discover) → unbrowse_replay (call).",
         "For authenticated sites, use unbrowse_login first. Use unbrowse_do for guidance.",
       ];
-
-      // Only mention wallet if explicitly configured
-      if (creatorWallet && solanaPrivateKey) {
-        lines.push("", `Skill marketplace wallet: ${creatorWallet}`);
-      }
 
       // Only mention credential source if configured
       if (credentialProvider) {
@@ -4660,7 +3858,6 @@ const plugin = {
     const features = [
       `${toolCount} tools`,
       autoDiscoverEnabled ? "auto-discover" : null,
-      creatorWallet ? "x402 publishing" : null,
       credentialProvider ? `creds:${credentialProvider.name}` : null,
     ].filter(Boolean).join(", ");
 

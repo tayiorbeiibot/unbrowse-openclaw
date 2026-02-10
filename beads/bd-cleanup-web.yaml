@@ -1,0 +1,11 @@
+id: bd-cleanup-web
+description: Delete the entire server/web directory (React marketplace frontend).
+context:
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Remove the directory `server/web` and all its contents.
+    2. Check `package.json` scripts for any references to `server/web` (e.g. build:web) and remove them.
+    3. Check `vercel.json` if it points to `server/web` and clean it up.
+acceptance_criteria:
+  - server/web does not exist

@@ -1,0 +1,14 @@
+id: bd-verify
+description: Verify the cleanup by running tests and checking for leftover references.
+context:
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Run `grep -r "solana" src/`. Should be empty.
+    2. Run `grep -r "wallet" src/`. Should be empty (or unrelated).
+    3. Run `npm install` (if not done).
+    4. Run `npm run build` (if build script exists) to ensure types are valid.
+    5. Check `index.ts` imports to ensure no missing file references.
+acceptance_criteria:
+  - No crypto references
+  - Build passes

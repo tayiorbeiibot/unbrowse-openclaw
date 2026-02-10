@@ -1,0 +1,16 @@
+id: bd-cleanup-skill-index
+description: Refactor src/skill-index.ts to remove payment and publishing logic.
+context:
+  file: src/skill-index.ts
+  path: /home/ubuntu/Projects/unbrowse
+execution:
+  instructions: |
+    1. Read `src/skill-index.ts`.
+    2. Remove methods: `buildAndSignPayment`, `download`, `publish`, `update`, `delete`, `signMessage`.
+    3. Remove imports for `@solana/*`, `bs58`, `tweetnacl`.
+    4. Keep `search` and `getSkillSummary` (and `healthCheck` if simple).
+    5. Clean up types (remove wallet/payment related interfaces).
+    6. Save `src/skill-index.ts`.
+acceptance_criteria:
+  - No crypto imports
+  - File compiles

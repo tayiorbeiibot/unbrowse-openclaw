@@ -1,9 +1,0 @@
-{
-  "buildCommand": "cd server/web && npm install && npm run build",
-  "outputDirectory": "server/web/dist",
-  "installCommand": "echo 'skipping root install'",
-  "framework": "vite",
-  "rewrites": [
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
-  ]
-}
